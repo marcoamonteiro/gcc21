@@ -1,0 +1,66 @@
+#!/usr/bin/python3
+
+import os
+import time
+import subprocess
+from tempfile import TemporaryDirectory
+
+from flask import Flask
+from flask import request
+from flask import send_file
+from werkzeug import secure_filename
+
+from two1.lib.wallet import Wallet
+from two1.lib.bitserv.flask import Payment
+
+OUTPUT_DIR = 'out/'
+
+app = Flask(__name__)
+
+wallet = Wallet()
+payment = Payment(app, wallet)
+
+def compile(files, flags):
+    ID = str(time.time())
+    exec = OUTPUT_DIR + ID + '.exec'
+    out = OUTPUT_DIR + ID + '.out'
+    command = ['gcc'] + flags + files + ['-o', exec]
+
+    outfile = open(out, 'w+')
+    outfile.write(str(ID))
+    outfile.write('\n')
+    outfile.close()
+    
+    outfile = open(out, 'a')
+    p = subprocess.Popen(command, stdout=outfile, stderr=outfile)
+    p.wait()
+    outfile.close()
+    
+    return out
+
+@app.route('/', methods=['POST'])
+@payment.required(1000)
+def respond():
+    with TemporaryDirectory() as sandbox:
+        files = []
+        flags = request.form['flags'].split()
+        for key in request.files:
+            file = request.files[key]
+            filename = secure_filename(file.filename)
+            filename = os.path.join(sandbox, filename)
+
+            files.append(filename)
+            file.save(filename)
+            
+        out = compile(files, flags)
+        return send_file(out)
+
+@app.route('/fetch', methods=['POST'])
+def fetch():
+    id = request.form['id']
+    exec = OUTPUT_DIR + secure_filename(id + '.exec')
+    return send_file(exec, mimetype='application/octet-stream')
+
+if __name__ == "__main__":
+    app.run(host='0.0.0.0', port=5000, debug=False)
+ 

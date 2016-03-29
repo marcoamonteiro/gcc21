@@ -1,0 +1,88 @@
+#!/usr/bin/python3
+
+import sys
+import os
+#import requests
+
+#import from the 21 Developer Library
+from two1.commands.config import Config
+from two1.lib.wallet import Wallet
+from two1.lib.bitrequests import BitTransferRequests
+
+#set up bitrequest client for BitTransfer requests
+wallet = Wallet()
+username = Config().username
+requests = BitTransferRequests(wallet, username)
+
+REMOTE_HOST = 'http://10.31.10.232:5000'
+
+def segregate_args():
+    is_out = False
+    files = []
+    flags = []
+    out = 'a.out'
+    for f in sys.argv[1:]:
+        if is_out:
+            out = f
+            is_out = False
+            continue
+        if f == '-o':
+            is_out = True
+            continue
+        if f[0] == '-':
+            flags.append(f)
+            continue
+        files.append(f)
+
+    return [flags, files, out]
+
+def remote_compile():
+    args = segregate_args()
+    flags = args[0]
+    files = args[1]
+    out = args[2]
+
+    flags_string = ' '.join(flags)
+    
+    files_list = {}
+    for file in files:
+        try:
+            fh = open(file, "rb")
+            files_list[file] = fh.read()
+        except:
+            print('Could not access \'' + file + '\'.')
+            return
+    
+    # validate out file first, so as to not waste the server's time (or our bitcoin!)
+    try:
+        executable = open(out, 'wb')
+    except:
+        print('Could not access \'' + out + '\' for writing.')
+        return
+
+    r = requests.post(REMOTE_HOST, files=files_list, data={'flags': flags_string})
+    if r.status_code != 200:
+        print("Could not complete transaction. Check that you have sufficient funds.")
+        return
+
+    # get the exec ID and print the compiler warnings/errors.
+    components = r.text.partition('\n')
+    id = components[0]
+    feedback = components[2]
+
+    e = requests.post(REMOTE_HOST + '/fetch', data={'id': id})
+    if e.status_code != 200:
+        print(feedback)
+        print("Could not download executable.")
+        return
+
+    for chunk in e.iter_content(4096):
+        executable.write(chunk)
+
+    print(feedback)
+
+    executable.close()
+    os.chmod(out, 493)
+
+if __name__ == '__main__':
+    remote_compile()
